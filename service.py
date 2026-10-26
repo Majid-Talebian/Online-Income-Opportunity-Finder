@@ -65,6 +65,8 @@ def validate_config(config):
  for term in p.get('forbidden_topics',[]):
   if term.casefold() in c['topic'].casefold():raise ValueError('موضوع در فهرست ممنوع شرکت است')
  c['max_searches']=p.get('max_searches',3)
+ c['topic']=c['topic'].strip()
+ if not c['topic']:raise ValueError('موضوع خالی مجاز نیست')
  return c
 
 def build_queries(config):
@@ -157,9 +159,13 @@ def research(run_id,ids,user_inputs=None):
  if not isinstance(ids,list) or not ids or len(ids)!=len(set(ids)):raise ValueError('انتخاب معتبر و غیرتکراری لازم است')
  available={x['id']:x for x in run['opportunities']}
  if any(id not in available for id in ids):raise ValueError('انتخاب خارج از گزارش')
+ if user_inputs is not None and not isinstance(user_inputs,dict):raise ValueError('ورودی تحلیل باید شیء JSON باشد')
+ if len(ids)>20:raise ValueError('حداکثر ۲۰ فرصت در یک تحلیل قابل انتخاب است')
+ if user_inputs and 'by_opportunity' in user_inputs and (not isinstance(user_inputs['by_opportunity'],dict) or any(not isinstance(v,dict) for v in user_inputs['by_opportunity'].values())):raise ValueError('ورودی اختصاصی هر فرصت باید شیء JSON باشد')
+ if len(ids)>1 and user_inputs and any(k in user_inputs for k in ['economics','gates']):raise ValueError('ورودی اقتصادی و قیود را برای هر فرصت جداگانه وارد کنید؛ فقط یک فرصت انتخاب کنید')
  dossiers=[]; analyses=[]
  for id in ids:
-  x=available[id];analysis=architecture.analyze_opportunity(x,run,run.get('profile_snapshot') or profile(),user_inputs or {})
+  x=available[id];analysis=architecture.analyze_opportunity(x,run,run.get('profile_snapshot') or profile(),((user_inputs or {}).get('by_opportunity',{}).get(id,{}) if 'by_opportunity' in (user_inputs or {}) else user_inputs or {}))
   analyses.append(analysis)
   dossiers.append({'opportunity_id':id,'title':x['title'],'sections':analysis['sections'],'decision':analysis['decision']['label'],'research_complete':False,'next':'اجرای برنامه اعتبارسنجی و ثبت شواهد مستقل','human_approval_required':True,'analysis_id':analysis['id'],'scores':analysis['scores'],'evidence_count':len(analysis['evidence']),'risks':analysis['risks'],'gates':analysis['gates'],'economics':analysis['economics'],'validation_plan':analysis['validation_plan']})
   put(analysis['id'],'analysis',analysis)
@@ -182,7 +188,9 @@ def update_validation_task(analysis_id,task_id,body):
   parsed=urllib.parse.urlsplit(evidence_url)
   if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:raise ValueError('برای مدرک فقط URL عمومی HTTPS وارد کنید')
  if status=='done' and not note.strip() and not evidence_url:raise ValueError('برای بستن گام، یادداشت نتیجه یا نشانی مدرک وارد کنید')
+ task.setdefault('history',[]).append({'at':now(),'from':task.get('status'),'to':status,'note':note.strip(),'evidence_url':evidence_url.strip()})
  task.update(status=status,user_note=note.strip(),user_evidence_url=evidence_url.strip(),updated_at=now(),completed_at=now() if status=='done' else None)
+ analysis['validation_progress']={'total':len(analysis['validation_plan']),'done':sum(t.get('status')=='done' for t in analysis['validation_plan']),'blocked':sum(t.get('status')=='blocked' for t in analysis['validation_plan'])}
  put(analysis_id,'analysis',analysis)
  for report in all_kind('research'):
   changed=False
@@ -240,7 +248,7 @@ def summarize(run_id,opportunity_id):
    put(result['id'],'summary',result);return result
   except Exception as e:raise ValueError(providers.error_message(e))
 
-def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':json.loads((ROOT/'sources.json').read_text(encoding='utf-8')),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
+def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':json.loads((ROOT/'sources.json').read_text(encoding='utf-8')),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,x,status=200):

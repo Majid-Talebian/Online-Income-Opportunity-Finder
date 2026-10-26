@@ -8,6 +8,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 import re
+import math
+from urllib.parse import urlunsplit, parse_qsl, urlencode
+
+def canonical_url(url):
+    p = urlsplit(url.strip())
+    query = [(k,v) for k,v in parse_qsl(p.query,keep_blank_values=True) if not k.lower().startswith("utm_") and k.lower() not in ("fbclid","gclid")]
+    return urlunsplit((p.scheme.lower(),p.netloc.lower(),p.path.rstrip("/") or "/",urlencode(sorted(query)),""))
+
 import uuid
 
 AGENTS = [
@@ -81,7 +89,7 @@ def _related_items(opportunity, run):
         rows = [{"title": opportunity.get("title", ""), "text": opportunity.get("text", ""), "url": opportunity["url"], "source": opportunity.get("source", ""), "date": opportunity.get("date", "")}]
     dedup, seen = [], set()
     for x in rows:
-        key = x.get("url") or (x.get("title", "").casefold(), x.get("source", ""))
+        key = canonical_url(x["url"]) if x.get("url") else (x.get("title", "").casefold(), x.get("source", ""))
         if key not in seen: seen.add(key); dedup.append(x)
     return dedup
 
@@ -90,7 +98,7 @@ def _evidence(items):
     for item in items:
         body = (item.get("title", "") + " " + item.get("text", ""))[:5000]
         kinds = [name for name, pattern in PATTERNS.items() if re.search(pattern, body, re.I)]
-        out.append({"id": str(uuid.uuid4()), "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": "transaction" in kinds, "age_days": _age_days(item)})
+        out.append({"id": str(uuid.uuid4()), "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": False, "transaction_mention": "transaction" in kinds, "age_days": _age_days(item)})
     return out
 
 def _market_score(evidence):
@@ -98,7 +106,7 @@ def _market_score(evidence):
     hosts = {e["host"] for e in demand if e["host"]}
     if not demand: return {"score": None, "confidence": "insufficient", "factors": [], "reason": "نشانهٔ مرتبطی از تقاضا در شواهد این پرونده پیدا نشد."}
     fresh = [e for e in demand if e["age_days"] is not None and e["age_days"] <= 90]
-    transactions = [e for e in demand if e["verified_transaction"]]
+    transactions = [e for e in demand if e["transaction_mention"]]
     # A bounded research-priority score, not market size, probability, or revenue.
     score = min(100, 20 + min(len(hosts), 4) * 12 + min(len(fresh), 4) * 7 + min(len(transactions), 2) * 10)
     confidence = "low" if len(hosts) < 2 else "medium" if len(hosts) < 4 and fresh else "medium"
@@ -108,7 +116,7 @@ def _market_score(evidence):
 def _execution_fit(opportunity, profile):
     skills = [s.casefold() for s in profile.get("skills_user_reported", [])]
     body = (opportunity.get("title", "") + " " + opportunity.get("text", "")).casefold()
-    hits = [s for s in skills if s and (s in body or any(w in s for w in body.split()))]
+    hits = [s for s in skills if s and (s in body or len(set(re.findall(r"[\wآ-ی]{3,}", s)) & set(re.findall(r"[\wآ-ی]{3,}", body))) >= 2)]
     hours, capital = profile.get("working_hours_week"), profile.get("capital")
     if not skills and hours is None and capital is None:
         return {"score": None, "confidence": "insufficient", "matched_skills": [], "factors": ["پروفایل توان اجرا ثبت نشده است"]}
@@ -131,7 +139,7 @@ def _economics(inputs):
         if not all(__import__("math").isfinite(v) for v in (revenue, variable, fixed)): raise ValueError
         if min(revenue, variable, fixed) < 0 or revenue <= 0: raise ValueError
         margin = revenue - variable
-        return {"status": "calculated_scenario", "currency": str(inputs.get("currency") or "نامشخص"), "revenue_per_sale": revenue, "variable_cost_per_sale": variable, "fixed_cost_period": fixed, "contribution_per_sale": margin, "contribution_margin_percent": round(margin / revenue * 100, 2), "break_even_sales": None if margin <= 0 else __import__("math").ceil(fixed / margin), "message": "سناریوی ورودی کاربر است؛ قیمت و سود بازار مستقلاً تأیید نشده‌اند."}
+        return {"status": "calculated_scenario", "currency": str(inputs.get("currency") or "نامشخص"), "revenue_per_sale": revenue, "variable_cost_per_sale": variable, "fixed_cost_period": fixed, "contribution_per_sale": margin, "contribution_margin_percent": round(margin / revenue * 100, 2), "fixed_cost_known": inputs.get("fixed_cost_period") is not None, "break_even_sales": None if margin <= 0 or inputs.get("fixed_cost_period") is None else math.ceil(fixed / margin), "message": "سناریوی ورودی کاربر است؛ قیمت و سود بازار مستقلاً تأیید نشده‌اند."}
     except (TypeError, ValueError, OverflowError):
         return {"status": "invalid_inputs", "currency": inputs.get("currency"), "message": "مقادیر اقتصادی باید عددی و نامنفی باشند و درآمد هر فروش از صفر بیشتر باشد."}
 
@@ -187,7 +195,7 @@ def analyze_opportunity(opportunity, run, profile, user_inputs=None):
     return {
         "id": str(uuid.uuid4()), "created_at": _now(), "opportunity_id": opportunity["id"], "run_id": run["id"],
         "opportunity_context": {"market_sector": run.get("config", {}).get("market_sector") or None, "business_model": run.get("config", {}).get("business_model") or None, "customer_segment": run.get("config", {}).get("customer") or None, "search_geography": {k: run.get("config", {}).get(k) or None for k in ("country", "province", "city")}, "customer_location": "unknown", "delivery_location": "unknown", "supply_location": "unknown"},
-        "pipeline_version": "1.0.0", "automation_mode": "human_approved", "agents": [dict(a, status="completed" if a["stage"] in ("evidence", "screening", "deep_analysis", "validation", "quality") else "ready") for a in AGENTS],
+        "pipeline_version": "1.1.0", "automation_mode": "human_approved", "agents": [dict(a, status="completed" if a["stage"] in ("evidence", "screening", "deep_analysis", "validation", "quality") else "ready") for a in AGENTS],
         "evidence": evidence, "evidence_categories": {k: [e["id"] for e in v] for k, v in categories.items()},
         "scores": {"market_attractiveness": market, "execution_feasibility": fit}, "economics": economics, "gates": gates, "risks": risks,
         "decision": {"label": decision, "human_approval_required": True, "auto_action_allowed": False},
