@@ -98,7 +98,7 @@ def _evidence(items):
     for item in items:
         body = (item.get("title", "") + " " + item.get("text", ""))[:5000]
         kinds = [name for name, pattern in PATTERNS.items() if re.search(pattern, body, re.I)]
-        out.append({"id": str(uuid.uuid4()), "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": False, "transaction_mention": "transaction" in kinds, "age_days": _age_days(item)})
+        out.append({"id": str(uuid.uuid4()), "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "source_id": item.get("source_id"), "acquisition": item.get("acquisition", "unknown"), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": False, "transaction_mention": "transaction" in kinds, "age_days": _age_days(item)})
     return out
 
 def _market_score(evidence):

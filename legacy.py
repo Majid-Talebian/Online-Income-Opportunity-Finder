@@ -28,7 +28,10 @@ def fetch(url):
  if len(data)>1500000: raise ValueError('حجم منبع بیش از حد مجاز')
  return parse(data,url)
 def parse(data,source):
- root=ET.fromstring(data); out=[]
+ if b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():raise ValueError('DTD در خوراک مجاز نیست')
+ root=ET.fromstring(data)
+ if root.tag not in ('rss','{http://www.w3.org/2005/Atom}feed','{http://www.w3.org/1999/02/22-rdf-syntax-ns#}RDF'):raise ValueError('پاسخ RSS/Atom معتبر نیست')
+ out=[]
  for e in list(root.findall('.//item'))+list(root.findall('.//{http://www.w3.org/2005/Atom}entry')):
   def val(tag):
    x=e.find(tag)

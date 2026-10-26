@@ -21,6 +21,59 @@ def get(id):
  return json.loads(r[0])
 def all_kind(kind):
  with connect() as c:return [json.loads(r[0]) for r in c.execute('SELECT body FROM objects WHERE kind=? ORDER BY rowid DESC',(kind,))]
+def registered_sources():
+ defaults=json.loads((ROOT/'sources.json').read_text(encoding='utf-8'))
+ saved={x['id']:x for x in all_kind('source')}
+ rows=[{**x,'kind':'reference','enabled':False,**saved.pop(x['id'],{})} for x in defaults]+list(saved.values())
+ for row in rows:
+  try:row['health']=get('source_health:'+row['id'])
+  except ValueError:row['health']={'status':'not_tested'}
+ return rows
+
+def source_by_id(source_id):
+ source=next((x for x in registered_sources() if x['id']==source_id),None)
+ if not source:raise ValueError('منبع پیدا نشد')
+ return source
+
+def save_source(body):
+ if not isinstance(body,dict):raise ValueError('تنظیم منبع نامعتبر')
+ old=source_by_id(body['id']) if body.get('id') else {}
+ name=body.get('name',old.get('name',''));url=body.get('feed_url',old.get('feed_url',''))
+ enabled=body.get('enabled',old.get('enabled',False))
+ if not isinstance(name,str) or not 1<=len(name.strip())<=150:raise ValueError('نام منبع لازم است؛ حداکثر ۱۵۰ نویسه')
+ if not isinstance(url,str) or len(url)>1500:raise ValueError('نشانی خوراک نامعتبر')
+ parsed=urllib.parse.urlsplit(url)
+ if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:raise ValueError('نشانی خوراک باید HTTPS و بدون رمز یا fragment باشد')
+ import ipaddress
+ host=parsed.hostname.lower()
+ if host=='localhost' or host.endswith(('.localhost','.local')):raise ValueError('نشانی محلی مجاز نیست')
+ try:address=ipaddress.ip_address(host)
+ except ValueError:address=None
+ if address is not None and not address.is_global:raise ValueError('نشانی داخلی مجاز نیست')
+ if type(enabled) is not bool:raise ValueError('وضعیت منبع نامعتبر')
+ category=body.get('category',old.get('category','discovery_signal'))
+ if category not in ['discovery_signal','purchase_intent','supply_offer','competition']:raise ValueError('دسته منبع نامعتبر')
+ rows=registered_sources()
+ if not old and len(rows)>=100:raise ValueError('سقف ۱۰۰ منبع ثبت‌شده')
+ if any(x.get('feed_url')==url.strip() and x['id']!=old.get('id') for x in rows):raise ValueError('خوراک قبلاً ثبت شده است')
+ source={'id':old.get('id') or 'feed:'+str(uuid.uuid4()),'name':name.strip(),'url':old.get('url') or url.strip(),'feed_url':url.strip(),'category':category,'kind':'rss','enabled':enabled,'updated_at':now()}
+ with LOCK:
+  if ACTIVE:raise ValueError('در زمان اجرای مأموریت منبع را تغییر ندهید')
+  put(source['id'],'source',source)
+  if old.get('feed_url')!=source['feed_url']:put('source_health:'+source['id'],'source_health',{'status':'not_tested'})
+ return source
+
+def probe_source(source_id):
+ source=source_by_id(source_id)
+ if source.get('kind')!='rss':raise ValueError('برای این مرجع خوراک RSS ثبت نشده است')
+ result={'source_id':source_id,'checked_at':now(),'feed_url':source['feed_url'],'scope':'manual_probe_outside_mission_budget'}
+ try:
+  items=fetch(source['feed_url'])
+  result.update(status='ok' if items else 'empty',items=len(items))
+ except Exception as e:result.update(status='failed',error=providers.error_message(e))
+ put('source_health:'+source_id,'source_health',result)
+ return result
+
 def profile():
  try:return get('company')
  except ValueError:return json.loads((ROOT/'company.example.json').read_text(encoding='utf-8'))
@@ -50,6 +103,14 @@ def save_profile(p):
 def validate_config(config):
  if not isinstance(config,dict):raise ValueError('مأموریت نامعتبر')
  c=copy.deepcopy(config);p=profile()
+ c.setdefault('source_mode','search')
+ if c['source_mode'] not in ['search','feeds']:raise ValueError('روش دریافت نامعتبر')
+ if c['source_mode']=='feeds':
+  ids=c.get('source_ids',[])
+  if not isinstance(ids,list) or not ids or any(not isinstance(i,str) for i in ids) or len(ids)>20 or len(set(ids))!=len(ids):raise ValueError('یک تا بیست منبع غیرتکراری انتخاب کنید')
+  for source_id in ids:
+   source=source_by_id(source_id)
+   if source.get('kind')!='rss' or not source.get('enabled'):raise ValueError('منبع منتخب فعال یا دارای خوراک نیست')
  c.setdefault('discovery_mode','topic')
  if c['discovery_mode'] not in ['topic','general']:raise ValueError('حالت کشف نامعتبر')
  for k in ['topic','country','city','province','customer','exclude','market_sector','business_model']:
@@ -84,6 +145,8 @@ def new_run(config):
  for topic in config.get('discovery_topics',[config['topic']]):
   if any(t.casefold() in topic.casefold() for t in p.get('forbidden_topics',[])):continue
   queries.extend(build_queries({**config,'topic':topic}))
+ if config.get('source_mode')=='feeds':
+  queries=[{'url':x['feed_url'],'label':x['name'],'source_id':x['id'],'kind':'rss','category':x['category']} for x in [source_by_id(i) for i in config['source_ids']]]
  r={'id':str(uuid.uuid4()),'started':now(),'status':'queued','sources':[],'opportunities':[],
     'cost':0,'cost_scope':'external_paid_calls_only','mode':'rss','config':config,
     'provider_snapshot':connections(),'profile_snapshot':copy.deepcopy(p),'queries':queries,'cursor':0,'raw_items':[],
@@ -102,8 +165,9 @@ def scan(config,run_id=None):
    # Persist the reservation BEFORE fetching: a crash cannot silently reset usage.
    r['inflight']=index;put(r['id'],'run',r)
    try:
-    found=providers.search(source,r.get('provider_snapshot',providers.DEFAULTS),fetch)
+    found=fetch(url) if source.get('kind')=='rss' else providers.search(source,r.get('provider_snapshot',providers.DEFAULTS),fetch)
     if not isinstance(found,list) or any(not isinstance(x,dict) or any(not isinstance(x.get(k),str) for k in ['title','text','url','source','date']) for x in found):raise ValueError('ساختار داده دریافتی نامعتبر')
+    for item in found:item.update(source_id=source.get('source_id'),retrieved_at=now(),acquisition='rss_direct' if source.get('kind')=='rss' else 'web_search')
     r['raw_items'].extend(found)
     r['sources'].append({**source,'status':'received','items':len(found),'network':'ok','extraction':'ok','structure':'ok','checked_at':now()})
    except Exception as e:r['sources'].append({**source,'status':'failed','error':providers.error_message(e),'network':'unverified','extraction':'unverified','structure':'unverified','checked_at':now()})
@@ -248,7 +312,7 @@ def summarize(run_id,opportunity_id):
    put(result['id'],'summary',result);return result
   except Exception as e:raise ValueError(providers.error_message(e))
 
-def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':json.loads((ROOT/'sources.json').read_text(encoding='utf-8')),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
+def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':registered_sources(),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,x,status=200):
@@ -276,6 +340,8 @@ class Handler(BaseHTTPRequestHandler):
    n=int(self.headers.get('Content-Length','0'))
    if not 0<n<=100000:raise ValueError('حجم نامعتبر')
    b=json.loads(self.rfile.read(n))
+   if self.path=='/source':return self.send(save_source(b))
+   if self.path=='/source-test':return self.send(probe_source(b['source_id']))
    if self.path=='/connections':return self.send(save_connections(b))
    if self.path=='/test-connection':return self.send(test_connection(b['kind']))
    if self.path=='/summarize':return self.send(summarize(b['run_id'],b['opportunity_id']))

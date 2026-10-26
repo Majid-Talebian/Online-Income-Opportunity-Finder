@@ -1,12 +1,12 @@
 {
-  "version": "0.8",
+  "version": "0.9",
   "scope": "local_opportunity_assessment_pipeline",
   "architecture_implemented": true,
   "phase_0": "partial",
   "phase_1": "partial",
   "phase_2": "partial",
   "baseline_python_tests_before_architecture": 26,
-  "architecture_test_suite": "35 passed",
+  "architecture_test_suite": "43 passed",
   "visual_browser_test": false,
   "react_postgres_migration": false,
   "agent_roles": 12,
@@ -27,5 +27,8 @@
     3,
     4,
     8
-  ]
+  ],
+  "source_registry": true,
+  "direct_rss_scan": true,
+  "live_direct_rss_test": "FAILED: DNS unavailable in execution environment"
 }
