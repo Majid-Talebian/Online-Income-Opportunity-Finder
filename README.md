@@ -14,3 +14,7 @@ The app does not require Floot or its AI credits. Fresh web searches still requi
 See the [Persian setup guide](README_FA.md), [architecture and decision rules](ARCHITECTURE_FA.md), and [provider connection guide](CONNECTIONS_FA.md).
 
 The local database (`arman.db`) and personal profile (`company.json`) are excluded from Git. Do not commit credentials, personal data, or runtime databases to this public repository.
+
+## Acceptance checks
+
+Run `python -m unittest discover -v` for isolated backend checks. For the optional DOM acceptance suite install development dependencies with `npm install`, then run `npm run test:ui` (Node 22+, Python on PATH, port 8765 available). The application itself needs only Python. DOM tests use synthetic source fixtures and a temporary SQLite database; they do not establish live source coverage or visual browser acceptance. See [the phase acceptance report](PHASES_0_4_ACCEPTANCE.md) for open live-data and calibration requirements.

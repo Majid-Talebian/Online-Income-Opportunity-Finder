@@ -7,3 +7,7 @@ __pycache__/
 *.py[cod]
 *.log
 test-results.txt
+
+node_modules/
+acceptance-state/
+live_checks*.json

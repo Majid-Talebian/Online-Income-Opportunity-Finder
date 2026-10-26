@@ -30,18 +30,30 @@ def fetch(url):
 def parse(data,source):
  if b'<!DOCTYPE' in data.upper() or b'<!ENTITY' in data.upper():raise ValueError('DTD در خوراک مجاز نیست')
  root=ET.fromstring(data)
- if root.tag not in ('rss','{http://www.w3.org/2005/Atom}feed','{http://www.w3.org/1999/02/22-rdf-syntax-ns#}RDF'):raise ValueError('پاسخ RSS/Atom معتبر نیست')
+ atom='http://www.w3.org/2005/Atom';rss1='http://purl.org/rss/1.0/'
+ if root.tag not in ('rss','{'+atom+'}feed','{http://www.w3.org/1999/02/22-rdf-syntax-ns#}RDF'):raise ValueError('پاسخ RSS/Atom معتبر نیست')
+ from evidence import clean_text
+ entries=list(root.findall('.//item'))+list(root.findall('.//{'+atom+'}entry'))+list(root.findall('.//{'+rss1+'}item'))
  out=[]
- for e in list(root.findall('.//item'))+list(root.findall('.//{http://www.w3.org/2005/Atom}entry')):
+ for e in entries[:100]:
   def val(tag):
-   x=e.find(tag)
-   if x is None: x=e.find('{http://www.w3.org/2005/Atom}'+tag)
-   return ''.join(x.itertext()).strip() if x is not None else ''
+   for name in [tag,'{'+atom+'}'+tag,'{'+rss1+'}'+tag]:
+    x=e.find(name)
+    if x is not None:return ''.join(x.itertext()).strip()
+   return ''
   link=val('link')
   if not link:
-   x=e.find('{http://www.w3.org/2005/Atom}link'); link=x.get('href','') if x is not None else ''
-  out.append({'title':val('title'),'text':re.sub('<[^>]+>',' ',val('description') or val('summary'))[:3000],'url':link,'source':source,'date':val('pubDate') or val('updated')})
- return out[:100]
+   links=e.findall('{'+atom+'}link')
+   selected=next((x for x in links if x.get('rel','alternate')=='alternate'),None)
+   link=selected.get('href','') if selected is not None else ''
+  if link:link=urllib.parse.urljoin(source,link)
+  encoded=e.find('{http://purl.org/rss/1.0/modules/content/}encoded')
+  content=''.join(encoded.itertext()) if encoded is not None else ''
+  date=val('pubDate') or val('published') or val('updated')
+  if not date:
+   dc=e.find('{http://purl.org/dc/elements/1.1/}date');date=dc.text or '' if dc is not None else ''
+  out.append({'title':clean_text(val('title')),'text':clean_text(content or val('description') or val('summary') or val('content'))[:5000],'url':link,'source':source,'date':date})
+ return out
 def samples():
  return [{'title':t,'text':d,'url':'','source':'داده آزمایشی','date':datetime.now(timezone.utc).isoformat()} for t,d in [('نیاز به داشبورد فروش','یک فروشگاه به تحلیل داده و داشبورد اکسل نیاز دارد'),('اتوماسیون گزارش هفتگی','گزارش دستی و نیاز به اتوماسیون داده'),('خدمات طراحی محتوا','تولید محتوا برای فروشگاه آنلاین')]]
 def assess(items,mission,profile,mode):

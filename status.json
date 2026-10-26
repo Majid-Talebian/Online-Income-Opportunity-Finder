@@ -1,12 +1,12 @@
 {
-  "version": "0.9",
+  "version": "0.10.0",
   "scope": "local_opportunity_assessment_pipeline",
   "architecture_implemented": true,
-  "phase_0": "partial",
-  "phase_1": "partial",
-  "phase_2": "partial",
+  "phase_0": "documented_and_mapped",
+  "phase_1": "local_acceptance_passed_visual_check_pending",
+  "phase_2": "local_acceptance_passed_live_sources_blocked",
   "baseline_python_tests_before_architecture": 26,
-  "architecture_test_suite": "43 passed",
+  "architecture_test_suite": "62 passed",
   "visual_browser_test": false,
   "react_postgres_migration": false,
   "agent_roles": 12,
@@ -18,7 +18,7 @@
   "ai_connected": false,
   "reference_sha256": "eea147a9d612f1dd6788c50091f689f8d4a23d44cc579aad8996706c4ecd5339",
   "live_search_test": "FAILED: DNS resolution unavailable in execution environment",
-  "dom_tests": "historical baseline only",
+  "dom_tests": "PASS: integrated HTTP + SQLite + jsdom acceptance",
   "ai_adapter": "ollama_local",
   "searxng_live_test": "not_configured",
   "pipeline_version": "1.1.0",
@@ -30,5 +30,17 @@
   ],
   "source_registry": true,
   "direct_rss_scan": true,
-  "live_direct_rss_test": "FAILED: DNS unavailable in execution environment"
+  "live_direct_rss_test": "FAILED: DNS unavailable in execution environment",
+  "screening_version": "screening-2.0",
+  "evidence_version": "evidence-2.0",
+  "all_phases_0_4_complete": false,
+  "phase_3": "local_acceptance_passed_real_source_quality_pending",
+  "phase_4": "local_acceptance_passed_empirical_calibration_pending",
+  "open_acceptance_items": [
+    "live_target_source_connections",
+    "source_specific_api_integration",
+    "real_document_extraction_review",
+    "empirical_screening_calibration",
+    "visual_browser_acceptance"
+  ]
 }

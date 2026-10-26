@@ -11,12 +11,11 @@ import re
 import math
 from urllib.parse import urlunsplit, parse_qsl, urlencode
 
-def canonical_url(url):
-    p = urlsplit(url.strip())
-    query = [(k,v) for k,v in parse_qsl(p.query,keep_blank_values=True) if not k.lower().startswith("utm_") and k.lower() not in ("fbclid","gclid")]
-    return urlunsplit((p.scheme.lower(),p.netloc.lower(),p.path.rstrip("/") or "/",urlencode(sorted(query)),""))
-
 import uuid
+import hashlib
+import evidence as evidence_tools
+from evidence import canonical_url
+import screening
 
 AGENTS = [
     {"id": "coordinator", "name": "هماهنگ‌کننده مأموریت", "stage": "workflow", "mode": "rules", "purpose": "ثبت ورودی، کنترل سقف‌ها و هدایت مراحل"},
@@ -80,7 +79,9 @@ def _related_items(opportunity, run):
     title_words = {w.casefold() for w in re.findall(r"[\wآ-ی]{3,}", opportunity.get("title", ""))}
     selected_url = opportunity.get("url")
     rows = []
-    for item in run.get("raw_items", []):
+    pool=run.get("normalized_items")
+    if pool is None:pool=evidence_tools.normalize_items(run.get("raw_items", []))[0]
+    for item in pool:
         body = (item.get("title", "") + " " + item.get("text", "")).casefold()
         overlap = sum(1 for w in title_words if w in body)
         if item.get("url") == selected_url or (title_words and overlap >= min(2, len(title_words))):
@@ -98,35 +99,16 @@ def _evidence(items):
     for item in items:
         body = (item.get("title", "") + " " + item.get("text", ""))[:5000]
         kinds = [name for name, pattern in PATTERNS.items() if re.search(pattern, body, re.I)]
-        out.append({"id": str(uuid.uuid4()), "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "source_id": item.get("source_id"), "acquisition": item.get("acquisition", "unknown"), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": False, "transaction_mention": "transaction" in kinds, "age_days": _age_days(item)})
+        negative = bool(re.search(r"\b(no (?:need|budget)|not (?:buying|hiring)|do not need)\b|نیازی ندار|بودجه ندار|خریدار نیست", body, re.I))
+        if negative:kinds=[k for k in kinds if k not in ('purchase_intent','transaction')]
+        out.append({"negated_purchase_signal": negative, "id": hashlib.sha256((item.get("url", "")+"\n"+body).encode()).hexdigest()[:24], "title": item.get("title", ""), "url": item.get("url", ""), "host": _host(item.get("url", "")), "source": item.get("source", ""), "source_id": item.get("source_id"), "acquisition": item.get("acquisition", "unknown"), "published_at": item.get("date") or None, "retrieved_at": item.get("retrieved_at") or _now(), "origins": item.get("origins", []), "possible_republication": item.get("possible_republication", False), "evidence_quality": item.get("evidence_quality", {}), "categories": kinds, "excerpt": item.get("text", "")[:1200], "evidence_status": "source_observed" if item.get("url", "").startswith("https://") else "source_unverified", "verified_transaction": False, "transaction_mention": "transaction" in kinds, "age_days": _age_days(item)})
     return out
 
 def _market_score(evidence):
-    demand = [e for e in evidence if set(e["categories"]) & {"purchase_intent", "transaction", "problem"}]
-    hosts = {e["host"] for e in demand if e["host"]}
-    if not demand: return {"score": None, "confidence": "insufficient", "factors": [], "reason": "نشانهٔ مرتبطی از تقاضا در شواهد این پرونده پیدا نشد."}
-    fresh = [e for e in demand if e["age_days"] is not None and e["age_days"] <= 90]
-    transactions = [e for e in demand if e["transaction_mention"]]
-    # A bounded research-priority score, not market size, probability, or revenue.
-    score = min(100, 20 + min(len(hosts), 4) * 12 + min(len(fresh), 4) * 7 + min(len(transactions), 2) * 10)
-    confidence = "low" if len(hosts) < 2 else "medium" if len(hosts) < 4 and fresh else "medium"
-    factors = [f"نشانه‌های مرتبط: {len(demand)}", f"دامنه‌های مستقل: {len(hosts)}", f"شواهد دارای تاریخ تا ۹۰ روز: {len(fresh)}", f"نشانه معامله صریح در متن منبع: {len(transactions)}"]
-    return {"score": score, "confidence": confidence, "factors": factors, "reason": "این امتیاز فقط اولویت پژوهش را مرتب می‌کند؛ اندازه بازار و تمایل به پرداخت را اثبات نمی‌کند."}
+    return screening.market_score(evidence)
 
 def _execution_fit(opportunity, profile):
-    skills = [s.casefold() for s in profile.get("skills_user_reported", [])]
-    body = (opportunity.get("title", "") + " " + opportunity.get("text", "")).casefold()
-    hits = [s for s in skills if s and (s in body or len(set(re.findall(r"[\wآ-ی]{3,}", s)) & set(re.findall(r"[\wآ-ی]{3,}", body))) >= 2)]
-    hours, capital = profile.get("working_hours_week"), profile.get("capital")
-    if not skills and hours is None and capital is None:
-        return {"score": None, "confidence": "insufficient", "matched_skills": [], "factors": ["پروفایل توان اجرا ثبت نشده است"]}
-    score = round(35 * len(hits) / max(len(skills), 1)) if skills else 0
-    factors = [f"مهارت‌های منطبق: {len(hits)} از {len(skills)}"]
-    if hours is None: factors.append("زمان هفتگی نامعلوم")
-    else: score += 20 if hours >= 5 else 10 if hours > 0 else 0; factors.append(f"زمان هفتگی ثبت‌شده: {hours}")
-    if capital is None: factors.append("سرمایه قابل تخصیص نامعلوم")
-    else: score += 20 if capital > 0 else 10; factors.append("سرمایه ثبت‌شده؛ مبلغ موردنیاز هنوز مقایسه نشده")
-    return {"score": min(100, score), "confidence": "low", "matched_skills": hits, "factors": factors}
+    return screening.execution_fit(opportunity, profile)
 
 def _economics(inputs):
     required = ["revenue_per_sale", "variable_cost_per_sale"]

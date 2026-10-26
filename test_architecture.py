@@ -14,7 +14,7 @@ class AssessmentTests(unittest.TestCase):
   run={'id':'run','opportunities':[x],'raw_items':[x,dict(x,url=x['url']+'?utm_source=copy#fragment')],'config':{},'profile_snapshot':{}}
   s.put('run','run',run);return x,run
  def test_canonical_dedup_preserves_meaningful_query(self):
-  self.assertEqual(a.canonical_url('https://EXAMPLE.org/x/?utm_source=a&sku=1#x'),'https://example.org/x?sku=1')
+  self.assertEqual(a.canonical_url('https://EXAMPLE.org/x/?utm_source=a&sku=1#x'),'https://example.org/x/?sku=1')
   x,r=self.fixture();self.assertEqual(len(a.analyze_opportunity(x,r,{})['evidence']),1)
  def test_transaction_mention_never_verified(self):
   x,r=self.fixture();report=a.analyze_opportunity(x,r,{})

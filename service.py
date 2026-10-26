@@ -6,6 +6,9 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from legacy import fetch,assess,DEFAULT
 import providers
 import architecture
+import evidence
+import screening
+import source_discovery
 ROOT=Path(__file__).parent
 DB=ROOT/'arman.db'; LOCK=threading.Lock(); STOP=threading.Event(); ACTIVE=False
 TOKEN=secrets.token_urlsafe(32)
@@ -28,7 +31,8 @@ def registered_sources():
  for row in rows:
   try:row['health']=get('source_health:'+row['id'])
   except ValueError:row['health']={'status':'not_tested'}
- return rows
+  if row.get('feed_url') and row['health'].get('feed_url') not in (None,row['feed_url']):row['health']={'status':'not_tested'}
+ return [r for r in rows if not r.get('archived')]
 
 def source_by_id(source_id):
  source=next((x for x in registered_sources() if x['id']==source_id),None)
@@ -74,6 +78,37 @@ def probe_source(source_id):
  put('source_health:'+source_id,'source_health',result)
  return result
 
+def archive_source(source_id):
+ with LOCK:
+  if ACTIVE:raise ValueError('در زمان مأموریت نمی‌توان منبع را حذف کرد')
+  source=source_by_id(source_id)
+  if source.get('kind')!='rss':raise ValueError('فقط منبع ثبت‌شده قابل بایگانی است')
+  source.pop('health',None);source.update(archived=True,enabled=False,updated_at=now())
+  put(source_id,'source',source)
+ return {'archived':True}
+
+def mission_draft():
+ try:return get('mission_draft')
+ except ValueError:return {}
+
+def save_mission_draft(body):
+ if not isinstance(body,dict):raise ValueError('مأموریت نامعتبر')
+ draft={}
+ for key in ['topic','customer','country','province','city','exclude','market_sector','business_model','discovery_mode','source_mode']:
+  value=body.get(key,'')
+  if not isinstance(value,str) or len(value)>500:raise ValueError('فیلد مأموریت نامعتبر')
+  draft[key]=value.strip()
+ if draft['source_mode'] not in ['search','feeds'] or draft['discovery_mode'] not in ['topic','general']:raise ValueError('حالت مأموریت نامعتبر')
+ ids=body.get('source_ids',[])
+ if not isinstance(ids,list) or len(ids)>20 or any(not isinstance(i,str) or len(i)>100 for i in ids):raise ValueError('فهرست منابع نامعتبر')
+ draft['source_ids']=list(dict.fromkeys(ids));draft['saved_at']=now();put('mission_draft','draft',draft)
+ return draft
+
+def discover_source(body):
+ if not isinstance(body,dict):raise ValueError('درخواست کشف منبع نامعتبر')
+ try:return source_discovery.discover(body.get('url'))
+ except Exception as error:return {'status':'failed','error':providers.error_message(error),'candidates':[],'verified_connection':False}
+
 def profile():
  try:return get('company')
  except ValueError:return json.loads((ROOT/'company.example.json').read_text(encoding='utf-8'))
@@ -93,6 +128,10 @@ def save_profile(p):
  if 'max_searches' in p:
   if type(p['max_searches']) is not int or not 1<=p['max_searches']<=20:raise ValueError('سقف جست‌وجو باید بین ۱ و ۲۰ باشد')
   old['max_searches']=p['max_searches']
+ for key,lo,hi in [('max_results',1,100),('max_age',1,365)]:
+  if key in p:
+   if type(p[key]) is not int or not lo<=p[key]<=hi:raise ValueError('سقف نتیجه یا تازگی نامعتبر')
+   old[key]=p[key]
  if 'export_preferred' in p:
   if type(p['export_preferred']) is not bool:raise ValueError('اولویت صادرات نامعتبر')
   old['export_preferred']=p['export_preferred']
@@ -102,7 +141,8 @@ def save_profile(p):
 
 def validate_config(config):
  if not isinstance(config,dict):raise ValueError('مأموریت نامعتبر')
- c=copy.deepcopy(config);p=profile()
+ c=copy.deepcopy(config);p=profile();c.pop('discovery_topics',None)
+ c['max_results']=p.get('max_results',20);c['max_age']=p.get('max_age',30)
  c.setdefault('source_mode','search')
  if c['source_mode'] not in ['search','feeds']:raise ValueError('روش دریافت نامعتبر')
  if c['source_mode']=='feeds':
@@ -124,8 +164,12 @@ def validate_config(config):
   c['topic']=skills[0];c['discovery_topics']=skills[:6]
  elif not c['topic'].strip():raise ValueError('موضوع کالا یا خدمت را وارد کنید')
  for term in p.get('forbidden_topics',[]):
-  if term.casefold() in c['topic'].casefold():raise ValueError('موضوع در فهرست ممنوع شرکت است')
+  if c['discovery_mode']=='topic' and term.casefold() in c['topic'].casefold():raise ValueError('موضوع در فهرست ممنوع شرکت است')
  c['max_searches']=p.get('max_searches',3)
+ if c['discovery_mode']=='general':
+  c['discovery_topics']=[t for t in c['discovery_topics'] if not any(f.casefold() in t.casefold() for f in p.get('forbidden_topics',[]))]
+  if not c['discovery_topics']:raise ValueError('تمام موضوع‌های عمومی ممنوع‌اند')
+  c['topic']=c['discovery_topics'][0]
  c['topic']=c['topic'].strip()
  if not c['topic']:raise ValueError('موضوع خالی مجاز نیست')
  return c
@@ -133,7 +177,8 @@ def validate_config(config):
 def build_queries(config):
  topic=config.get('topic','').strip(); customer=config.get('customer','').strip(); country=config.get('country','').strip(); city=config.get('city','').strip()
  if not topic: raise ValueError('موضوع کالا یا خدمت را وارد کنید')
- area=' '.join(x for x in [config.get('market_sector','').strip(),city,country] if x)
+ model={'service':'service project','digital_product':'software subscription','ecommerce':'product shop','affiliate':'affiliate commission','content':'content advertising','marketplace':'marketplace','consulting':'consulting'}.get(config.get('business_model'),'')
+ area=' '.join(x for x in [config.get('market_sector','').strip(),model,city,country] if x)
  queries=[(f'"{topic}" {customer} {area} (need OR looking for OR project OR tender)', 'تقاضا و نیاز'),(f'"{topic}" {area} (supplier OR provider OR price OR alternatives)', 'عرضه و رقبا'),(f'"{topic}" {area} (launch OR trend OR innovation OR business)', 'ایده و روند')]
  return [{'url':'https://www.bing.com/search?'+urllib.parse.urlencode({'q':q,'format':'rss','setmkt':'en-US'}),'label':label} for q,label in queries]
 def record_event(r,event):
@@ -147,6 +192,9 @@ def new_run(config):
   queries.extend(build_queries({**config,'topic':topic}))
  if config.get('source_mode')=='feeds':
   queries=[{'url':x['feed_url'],'label':x['name'],'source_id':x['id'],'kind':'rss','category':x['category']} for x in [source_by_id(i) for i in config['source_ids']]]
+ if config.get('source_mode','search')=='search' and config.get('discovery_topics'):
+  grouped=[build_queries({**config,'topic':t}) for t in config['discovery_topics']]
+  queries=[{**q,'topic':config['discovery_topics'][i]} for stage in range(3) for i,group in enumerate(grouped) for q in [group[stage]]]
  r={'id':str(uuid.uuid4()),'started':now(),'status':'queued','sources':[],'opportunities':[],
     'cost':0,'cost_scope':'external_paid_calls_only','mode':'rss','config':config,
     'provider_snapshot':connections(),'profile_snapshot':copy.deepcopy(p),'queries':queries,'cursor':0,'raw_items':[],
@@ -173,14 +221,16 @@ def scan(config,run_id=None):
    except Exception as e:r['sources'].append({**source,'status':'failed','error':providers.error_message(e),'network':'unverified','extraction':'unverified','structure':'unverified','checked_at':now()})
    r['cursor']=index+1;r.pop('inflight',None);record_event(r,'source_finished')
   keywords=', '.join(r['config'].get('discovery_topics',[r['config']['topic']]))
-  mission={'keywords':keywords,'exclude':r['config'].get('exclude','')}
+  mission={'keywords':keywords,'exclude':','.join([r['config'].get('exclude','')]+r['profile_snapshot'].get('forbidden_topics',[]))}
   r['opportunities']=[]
-  for x in assess(r['raw_items'],mission,DEFAULT,'rss'):
+  normalized,normalization=evidence.normalize_items(r['raw_items']);r['normalized_items']=normalized;r['normalization']=normalization
+  for x in assess(normalized,mission,{**DEFAULT,'max_results':r['config'].get('max_results',20),'max_age':r['config'].get('max_age',30)},'rss'):
    oid=hashlib.sha256((x['url'] or x['title']).encode()).hexdigest()[:24]
    x.update(id=oid,category='discovery_lead',retrieved_at=now(),country=None,province=None,city=None,
     search_region={k:r['config'].get(k) or None for k in ['country','province','city']},
     geography_status='unknown',supply_country=None,market_score=None,decision='سرنخ اولیه؛ نیازمند راستی‌آزمایی',
     constraints={'payment':'unknown','delivery':'unknown','capacity':'unknown'})
+   x['screening']={'market':screening.market_score(architecture._evidence([x])),'execution':screening.execution_fit(x,r['profile_snapshot']),'version':screening.VERSION}
    r['opportunities'].append(x)
   if STOP.is_set():r['status']='stopped'
   elif r['status']!='budget_exhausted':
@@ -195,6 +245,7 @@ def scan(config,run_id=None):
 def start(config):
  global ACTIVE
  config=validate_config(config)
+ save_mission_draft(config)
  with LOCK:
   if ACTIVE:raise ValueError('مأموریت دیگری فعال است')
   r=new_run(config);ACTIVE=True;STOP.clear()
@@ -312,7 +363,7 @@ def summarize(run_id,opportunity_id):
    put(result['id'],'summary',result);return result
   except Exception as e:raise ValueError(providers.error_message(e))
 
-def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':registered_sources(),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
+def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':registered_sources(),'mission_draft':mission_draft(),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,x,status=200):
@@ -325,6 +376,9 @@ class Handler(BaseHTTPRequestHandler):
    except Exception as e:
     print(f'GET /api failed: {type(e).__name__}: {e}',flush=True)
     return self.send({'error':'خطا در خواندن وضعیت برنامه'},500)
+  if self.path=='/app.js':
+   raw=(ROOT/'app.js').read_text(encoding='utf-8').replace('__TOKEN__',TOKEN).encode()
+   self.send_response(200);self.send_header('Content-Type','application/javascript; charset=utf-8');self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw);return
   if self.path=='/reference':
    raw=(ROOT/'reference.html').read_bytes();self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.end_headers();self.wfile.write(raw);return
   if self.path!='/':return self.send({'error':'not found'},404)
@@ -340,6 +394,9 @@ class Handler(BaseHTTPRequestHandler):
    n=int(self.headers.get('Content-Length','0'))
    if not 0<n<=100000:raise ValueError('حجم نامعتبر')
    b=json.loads(self.rfile.read(n))
+   if self.path=='/mission-draft':return self.send(save_mission_draft(b))
+   if self.path=='/source-archive':return self.send(archive_source(b['source_id']))
+   if self.path=='/source-discover':return self.send(discover_source(b))
    if self.path=='/source':return self.send(save_source(b))
    if self.path=='/source-test':return self.send(probe_source(b['source_id']))
    if self.path=='/connections':return self.send(save_connections(b))
