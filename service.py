@@ -5,10 +5,11 @@ from datetime import datetime,timezone
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from legacy import fetch,assess,DEFAULT
 import providers
+import architecture
 ROOT=Path(__file__).parent
 DB=ROOT/'arman.db'; LOCK=threading.Lock(); STOP=threading.Event(); ACTIVE=False
 TOKEN=secrets.token_urlsafe(32)
-SECTIONS=['منشأ ایده','نیاز مشتری','جغرافیا','شواهد','عرضه‌کنندگان','شکاف بازار','رقبا و تازگی','تأمین یا تولید','صادرات از ایران','اقتصاد','تناسب با شرکت','الزامات','ریسک','آزمون کوچک']
+SECTIONS=architecture.SECTIONS
 def now():return datetime.now(timezone.utc).isoformat()
 def connect():
  c=sqlite3.connect(DB);c.execute('CREATE TABLE IF NOT EXISTS objects(id TEXT PRIMARY KEY,kind TEXT NOT NULL,body TEXT NOT NULL)');return c
@@ -51,9 +52,11 @@ def validate_config(config):
  c=copy.deepcopy(config);p=profile()
  c.setdefault('discovery_mode','topic')
  if c['discovery_mode'] not in ['topic','general']:raise ValueError('حالت کشف نامعتبر')
- for k in ['topic','country','city','province','customer','exclude']:
+ for k in ['topic','country','city','province','customer','exclude','market_sector','business_model']:
   c.setdefault(k,'')
   if not isinstance(c[k],str) or len(c[k])>500:raise ValueError('ورودی متنی نامعتبر')
+ if c['business_model'] and c['business_model'] not in ['service','digital_product','ecommerce','affiliate','content','marketplace','consulting','other']:
+  raise ValueError('روش کسب درآمد نامعتبر')
  if c['discovery_mode']=='general':
   skills=p.get('skills_user_reported',[])
   if not skills:raise ValueError('برای کشف عمومی ابتدا مهارت‌ها را ثبت کنید')
@@ -67,7 +70,7 @@ def validate_config(config):
 def build_queries(config):
  topic=config.get('topic','').strip(); customer=config.get('customer','').strip(); country=config.get('country','').strip(); city=config.get('city','').strip()
  if not topic: raise ValueError('موضوع کالا یا خدمت را وارد کنید')
- area=' '.join(x for x in [city,country] if x)
+ area=' '.join(x for x in [config.get('market_sector','').strip(),city,country] if x)
  queries=[(f'"{topic}" {customer} {area} (need OR looking for OR project OR tender)', 'تقاضا و نیاز'),(f'"{topic}" {area} (supplier OR provider OR price OR alternatives)', 'عرضه و رقبا'),(f'"{topic}" {area} (launch OR trend OR innovation OR business)', 'ایده و روند')]
  return [{'url':'https://www.bing.com/search?'+urllib.parse.urlencode({'q':q,'format':'rss','setmkt':'en-US'}),'label':label} for q,label in queries]
 def record_event(r,event):
@@ -149,19 +152,46 @@ def recover():
    r['status']='interrupted';record_event(r,'process_interrupted')
 
 
-def research(run_id,ids):
+def research(run_id,ids,user_inputs=None):
  run=get(run_id)
  if not isinstance(ids,list) or not ids or len(ids)!=len(set(ids)):raise ValueError('انتخاب معتبر و غیرتکراری لازم است')
  available={x['id']:x for x in run['opportunities']}
  if any(id not in available for id in ids):raise ValueError('انتخاب خارج از گزارش')
- dossiers=[]
+ dossiers=[]; analyses=[]
  for id in ids:
-  x=available[id];sections=[{'name':s,'status':'unknown','finding':'شواهد کافی دریافت نشده','sources':[]} for s in SECTIONS]
-  sections[0].update(status='source_recorded',finding=x['title'],sources=[x['url']])
-  sections[3].update(status='discovery_only',finding=x['text'],sources=[x['url']])
-  dossiers.append({'opportunity_id':id,'title':x['title'],'sections':sections,'decision':'رفع ابهام','research_complete':False,'next':'دریافت شواهد مستقل درباره مشتری، رقبا و امکان اجرا','human_approval_required':True})
- report={'id':str(uuid.uuid4()),'run_id':run_id,'selected':ids,'created':now(),'dossiers':dossiers,'status':'awaiting_evidence','automated_deep_research':False}
+  x=available[id];analysis=architecture.analyze_opportunity(x,run,run.get('profile_snapshot') or profile(),user_inputs or {})
+  analyses.append(analysis)
+  dossiers.append({'opportunity_id':id,'title':x['title'],'sections':analysis['sections'],'decision':analysis['decision']['label'],'research_complete':False,'next':'اجرای برنامه اعتبارسنجی و ثبت شواهد مستقل','human_approval_required':True,'analysis_id':analysis['id'],'scores':analysis['scores'],'evidence_count':len(analysis['evidence']),'risks':analysis['risks'],'gates':analysis['gates'],'economics':analysis['economics'],'validation_plan':analysis['validation_plan']})
+  put(analysis['id'],'analysis',analysis)
+ report={'id':str(uuid.uuid4()),'run_id':run_id,'selected':ids,'created':now(),'dossiers':dossiers,'analyses':analyses,'status':'awaiting_user_validation','automated_deep_research':False,'pipeline_version':'1.0.0'}
  put(report['id'],'research',report);return report
+
+def update_validation_task(analysis_id,task_id,body):
+ if not isinstance(body,dict):raise ValueError('به‌روزرسانی نامعتبر')
+ with connect() as c:row=c.execute('SELECT body FROM objects WHERE id=? AND kind=?',(analysis_id,'analysis')).fetchone()
+ if not row:raise ValueError('تحلیل پیدا نشد')
+ analysis=json.loads(row[0]);task=next((t for t in analysis.get('validation_plan',[]) if t.get('id')==task_id),None)
+ if not task:raise ValueError('گام اعتبارسنجی پیدا نشد')
+ status=body.get('status',task.get('status','todo'))
+ if status not in ['todo','in_progress','done','blocked']:raise ValueError('وضعیت گام نامعتبر')
+ note=body.get('note',task.get('user_note',''))
+ evidence_url=body.get('evidence_url',task.get('user_evidence_url',''))
+ if not isinstance(note,str) or len(note)>2000:raise ValueError('یادداشت باید حداکثر ۲۰۰۰ نویسه باشد')
+ if not isinstance(evidence_url,str) or len(evidence_url)>1000:raise ValueError('نشانی مدرک نامعتبر است')
+ if evidence_url:
+  parsed=urllib.parse.urlsplit(evidence_url)
+  if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password:raise ValueError('برای مدرک فقط URL عمومی HTTPS وارد کنید')
+ if status=='done' and not note.strip() and not evidence_url:raise ValueError('برای بستن گام، یادداشت نتیجه یا نشانی مدرک وارد کنید')
+ task.update(status=status,user_note=note.strip(),user_evidence_url=evidence_url.strip(),updated_at=now(),completed_at=now() if status=='done' else None)
+ put(analysis_id,'analysis',analysis)
+ for report in all_kind('research'):
+  changed=False
+  for item in report.get('analyses',[]):
+   if item.get('id')==analysis_id:item['validation_plan']=analysis['validation_plan'];changed=True
+  for dossier in report.get('dossiers',[]):
+   if dossier.get('analysis_id')==analysis_id:dossier['validation_plan']=analysis['validation_plan'];changed=True
+  if changed:put(report['id'],'research',report)
+ return {'updated':True,'task':task,'analysis_id':analysis_id}
 
 def connections():
  try:return get('connections')['config']
@@ -210,7 +240,7 @@ def summarize(run_id,opportunity_id):
    put(result['id'],'summary',result);return result
   except Exception as e:raise ValueError(providers.error_message(e))
 
-def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'sources':json.loads((ROOT/'sources.json').read_text(encoding='utf-8')),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'external_actions':False}}
+def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':json.loads((ROOT/'sources.json').read_text(encoding='utf-8')),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,x,status=200):
@@ -245,7 +275,8 @@ class Handler(BaseHTTPRequestHandler):
    if self.path=='/scan':return self.send(start(b))
    if self.path=='/resume':return self.send(resume(b['run_id']))
    if self.path=='/stop':STOP.set();return self.send({'stopping':True})
-   if self.path=='/research':return self.send(research(b['run_id'],b['selected']))
+   if self.path=='/research':return self.send(research(b['run_id'],b['selected'],b.get('inputs')))
+   if self.path=='/task':return self.send(update_validation_task(b['analysis_id'],b['task_id'],b))
    return self.send({'error':'not found'},404)
   except (ValueError,KeyError,TypeError) as e:return self.send({'error':str(e)},400)
 if __name__=='__main__':
