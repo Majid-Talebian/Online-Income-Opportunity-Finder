@@ -1,0 +1,9 @@
+arman.db
+arman.db-*
+company.json
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.log
+test-results.txt

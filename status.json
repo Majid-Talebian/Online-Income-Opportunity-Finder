@@ -1,0 +1,16 @@
+{
+  "version": "0.6",
+  "scope": "foundation_increment",
+  "phase_0": "partial",
+  "phase_1": "partial",
+  "phase_2": "partial",
+  "python_tests_passed": 26,
+  "visual_browser_test": false,
+  "react_postgres_migration": false,
+  "ai_connected": false,
+  "reference_sha256": "eea147a9d612f1dd6788c50091f689f8d4a23d44cc579aad8996706c4ecd5339",
+  "live_search_test": "FAILED: DNS resolution unavailable in execution environment",
+  "dom_tests": "PASS",
+  "ai_adapter": "ollama_local",
+  "searxng_live_test": "not_configured"
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "skills_user_reported": [],
+  "working_hours_week": null,
+  "capital": null,
+  "external_suppliers": [],
+  "sourcing_origin": "",
+  "target_countries": [],
+  "export_preferred": true,
+  "agent_capacity_verified": false,
+  "paid_budget": 0,
+  "require_owner_approval": [
+    "contact",
+    "proposal",
+    "contract",
+    "purchase",
+    "delivery"
+  ]
+}

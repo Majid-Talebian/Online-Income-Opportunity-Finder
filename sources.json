@@ -1,0 +1,79 @@
+[
+  {
+    "id": "producthunt",
+    "name": "Product Hunt",
+    "host": "producthunt.com",
+    "url": "https://www.producthunt.com/",
+    "category": "discovery_signal",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "explodingtopics",
+    "name": "Exploding Topics",
+    "host": "explodingtopics.com",
+    "url": "https://explodingtopics.com/",
+    "category": "discovery_signal",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "starterstory",
+    "name": "Starter Story",
+    "host": "starterstory.com",
+    "url": "https://www.starterstory.com/explore",
+    "category": "discovery_signal",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "trendhunter",
+    "name": "Trend Hunter",
+    "host": "trendhunter.com",
+    "url": "https://www.trendhunter.com/",
+    "category": "discovery_signal",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "springwise",
+    "name": "Springwise",
+    "host": "springwise.com",
+    "url": "https://springwise.com/",
+    "category": "discovery_signal",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "karlancer",
+    "name": "Karlancer",
+    "url": "https://www.karlancer.com/",
+    "category": "purchase_intent",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "freelancer",
+    "name": "Freelancer",
+    "url": "https://www.freelancer.com/",
+    "category": "purchase_intent",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "loyverse",
+    "name": "Loyverse",
+    "url": "https://loyverse.com/",
+    "category": "supply_offer",
+    "status": "not_checked",
+    "api_verified": false
+  },
+  {
+    "id": "talyon",
+    "name": "Talyon",
+    "url": "https://talyon.co.uk/",
+    "category": "supply_offer",
+    "status": "not_checked",
+    "api_verified": false
+  }
+]
