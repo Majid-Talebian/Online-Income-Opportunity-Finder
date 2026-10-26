@@ -1,8 +1,15 @@
 {
   "name": "online-income-opportunity-finder-checks",
   "private": true,
-  "version": "0.10.0",
-  "scripts": {"test:ui": "node tests/ui_acceptance.cjs", "test:python": "python -m unittest discover -v"},
-  "devDependencies": {"jsdom": "30.1.3"},
-  "engines": {"node": ">=22"}
+  "version": "0.11.0",
+  "scripts": {
+    "test:ui": "node tests/ui_acceptance.cjs",
+    "test:python": "python -m unittest discover -v"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }

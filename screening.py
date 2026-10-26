@@ -1,10 +1,13 @@
 """Versioned, deterministic research-priority rubric. No calibrated success probability."""
 import re
-VERSION='screening-2.0'
+VERSION='screening-2.1'
 
 def market_score(evidence):
     demand=[e for e in evidence if set(e['categories']) & {'purchase_intent','transaction','problem'}]
     if not demand:return {'score':None,'confidence':'insufficient','factors':['هیچ نشانه مرتبط از نیاز ثبت نشده'],'reason':'داده ناکافی برای رتبه پژوهشی','rubric_version':VERSION,'components':[]}
+    unique={}
+    for item in demand:unique.setdefault(item.get('republication_group') or item.get('id') or item.get('url'),item)
+    demand=list(unique.values())
     fresh=[e for e in demand if e['age_days'] is not None and e['age_days']<=90]
     dated=[e for e in demand if e['age_days'] is not None]
     # Different domains can republish the same story; they are never independent buyers.

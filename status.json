@@ -1,12 +1,12 @@
 {
-  "version": "0.10.0",
+  "version": "0.11.0",
   "scope": "local_opportunity_assessment_pipeline",
   "architecture_implemented": true,
   "phase_0": "documented_and_mapped",
   "phase_1": "local_acceptance_passed_visual_check_pending",
   "phase_2": "local_acceptance_passed_live_sources_blocked",
   "baseline_python_tests_before_architecture": 26,
-  "architecture_test_suite": "62 passed",
+  "architecture_test_suite": "70 passed",
   "visual_browser_test": false,
   "react_postgres_migration": false,
   "agent_roles": 12,
@@ -31,8 +31,8 @@
   "source_registry": true,
   "direct_rss_scan": true,
   "live_direct_rss_test": "FAILED: DNS unavailable in execution environment",
-  "screening_version": "screening-2.0",
-  "evidence_version": "evidence-2.0",
+  "screening_version": "screening-2.1",
+  "evidence_version": "evidence-2.1",
   "all_phases_0_4_complete": false,
   "phase_3": "local_acceptance_passed_real_source_quality_pending",
   "phase_4": "local_acceptance_passed_empirical_calibration_pending",
@@ -42,5 +42,8 @@
     "real_document_extraction_review",
     "empirical_screening_calibration",
     "visual_browser_acceptance"
-  ]
+  ],
+  "similar_republication_review": true,
+  "user_priority_feedback": true,
+  "calibration_method": "user_label_pairwise_agreement_not_market_validation"
 }

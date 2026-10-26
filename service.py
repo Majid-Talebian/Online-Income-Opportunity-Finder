@@ -8,6 +8,7 @@ import providers
 import architecture
 import evidence
 import screening
+import calibration
 import source_discovery
 ROOT=Path(__file__).parent
 DB=ROOT/'arman.db'; LOCK=threading.Lock(); STOP=threading.Event(); ACTIVE=False
@@ -363,7 +364,18 @@ def summarize(run_id,opportunity_id):
    put(result['id'],'summary',result);return result
   except Exception as e:raise ValueError(providers.error_message(e))
 
-def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'sources':registered_sources(),'mission_draft':mission_draft(),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
+def save_screening_feedback(body):
+ if not isinstance(body,dict):raise ValueError('ارزیابی نامعتبر')
+ run=get(body.get('run_id',''));opportunity=next((x for x in run.get('opportunities',[]) if x['id']==body.get('opportunity_id')),None)
+ if not opportunity:raise ValueError('فرصت در مأموریت پیدا نشد')
+ priority=body.get('priority');note=body.get('note','')
+ if type(priority) is not int or not 1<=priority<=5:raise ValueError('اولویت باید عدد صحیح ۱ تا ۵ باشد')
+ if not isinstance(note,str) or not 5<=len(note.strip())<=2000:raise ValueError('دلیل ارزیابی را در ۵ تا ۲۰۰۰ نویسه وارد کنید')
+ score=opportunity.get('screening',{})
+ item={'id':'feedback:'+run['id']+':'+opportunity['id'],'run_id':run['id'],'opportunity_id':opportunity['id'],'priority':priority,'note':note.strip(),'created_at':now(),'market_score':score.get('market',{}).get('score'),'rubric_version':score.get('version'),'source_url':opportunity.get('url'),'label_source':'user_self_reported'}
+ put(item['id'],'screening_feedback',item);return {'saved':True,'feedback':item}
+
+def snapshot():return {'active':ACTIVE,'connections':connections(),'connection_health':health(),'summaries':all_kind('summary'),'profile':profile(),'runs':all_kind('run'),'research':all_kind('research'),'analyses':all_kind('analysis'),'agents':architecture.agent_snapshot(ACTIVE,'discovery' if ACTIVE else None),'calibration':calibration.evaluate_feedback(all_kind('screening_feedback')),'screening_feedback':all_kind('screening_feedback'),'sources':registered_sources(),'mission_draft':mission_draft(),'capabilities':{'rss_scan':True,'free_web_search':False,'ai_model':health().get('model',{}).get('status')=='ok','deep_research':False,'evidence_assessment':True,'deep_research_mode':'evidence_assessment_and_validation_plan','external_actions':False,'transaction_verified':False,'automated_decisions':False}}
 class Handler(BaseHTTPRequestHandler):
  def log_message(self,*a):pass
  def send(self,x,status=200):
@@ -394,6 +406,7 @@ class Handler(BaseHTTPRequestHandler):
    n=int(self.headers.get('Content-Length','0'))
    if not 0<n<=100000:raise ValueError('حجم نامعتبر')
    b=json.loads(self.rfile.read(n))
+   if self.path=='/screening-feedback':return self.send(save_screening_feedback(b))
    if self.path=='/mission-draft':return self.send(save_mission_draft(b))
    if self.path=='/source-archive':return self.send(archive_source(b['source_id']))
    if self.path=='/source-discover':return self.send(discover_source(b))

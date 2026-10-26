@@ -22,9 +22,12 @@ async function open(){const vc=new VirtualConsole();vc.on('jsdomError',e=>errors
  assert.equal(d.getElementById('topic').value,'dashboard');assert.equal(d.getElementById('sourceMode').value,'feeds');assert.equal(d.getElementById('capital').value,'0');assert.equal(d.getElementById('maxAge').value,'90');assert.equal(d.querySelector('[data-select-source]').checked,true);
  await w.startScan();await w.poll();await wait(()=>d.querySelectorAll('tr[data-lead-id]').length===2);
  d.getElementById('rankSort').value='market';w.renderRun();assert.ok(d.querySelector('tr[data-lead-id]').textContent.includes('customer request'));
- const checked=[...d.querySelectorAll('[data-lead]')];checked.forEach(x=>x.checked=true);w.compareSelected();assert.equal(d.getElementById('screenDetail').open,true);assert.ok(d.getElementById('screenContent').textContent.includes('screening-2.0'));
+ const checked=[...d.querySelectorAll('[data-lead]')];checked.forEach(x=>x.checked=true);w.compareSelected();assert.equal(d.getElementById('screenDetail').open,true);assert.ok(d.getElementById('screenContent').textContent.includes('screening-2.1'));
  d.getElementById('dateFilter').value='unknown';w.renderRun();assert.equal(d.querySelectorAll('tr[data-lead-id]').length,1);assert.ok(d.querySelector('tr[data-lead-id]').textContent.includes('supplier'));
  d.getElementById('dateFilter').value='all';w.renderRun();
+ const leadIds=[...d.querySelectorAll('tr[data-lead-id]')].map(x=>x.dataset.leadId);
+ for(const [index,id] of leadIds.entries()){const answers=[index===0?'5':'1','Explicit synthetic acceptance review'];w.prompt=()=>answers.shift();await w.labelPriority(id)}
+ w.showCalibration();assert.ok(d.getElementById('screenContent').textContent.includes('insufficient_comparable_labels'));assert.ok(d.getElementById('screenContent').textContent.includes('user_self_reported'));
  const sourceId=d.querySelector('[data-select-source]').dataset.selectSource;await w.post('/source-test',{source_id:sourceId});assert.ok(d.getElementById('feedRows').textContent.includes('دریافت موفق'));
  await w.archiveFeed(sourceId);assert.equal(d.querySelectorAll('[data-select-source]').length,0);assert.equal(d.querySelectorAll('tr[data-lead-id]').length,2);
  assert.deepEqual(errors,[]);console.log('PASS: profile/reload, mission/reload, source registration/probe/archive, direct scan, ranking/filter/comparison and historical run retention. DOM only; no visual browser verification.');

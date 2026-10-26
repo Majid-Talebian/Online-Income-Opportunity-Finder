@@ -54,4 +54,26 @@ def normalize_items(items):
         row['quality_score']=round((int(status=='valid')+int(bool(row['text']))+int(public_https(row['source'])))*100/3)
         result.append(row);by_url[row['url']]=row
         if fingerprint:by_content[fingerprint]=row
-    return result,{'received':len(items),'accepted':len(result),'duplicates':sum(r['duplicate_count'] for r in result),'rejected':rejected,'policy_version':'evidence-2.0'}
+    mark_similar_republications(result)
+    return result,{'received':len(items),'accepted':len(result),'duplicates':sum(r['duplicate_count'] for r in result),'rejected':rejected,'policy_version':'evidence-2.1'}
+
+
+def mark_similar_republications(rows, threshold=0.82):
+    """Flag probable mirrors, never delete records or equate customers."""
+    candidates=[]
+    for row in rows:
+        text=row['text'].casefold().translate(str.maketrans({'ي':'ی','ك':'ک'}))
+        words=re.findall(r'\w+',text)
+        grams={tuple(words[i:i+4]) for i in range(len(words)-3)} if len(words)>=25 else set()
+        numbers=re.findall(r'\d+(?:[.,]\d+)*',text)
+        for previous,oldgrams,oldnumbers in candidates:
+            if not grams or not oldgrams or numbers!=oldnumbers:continue
+            union=grams|oldgrams;similarity=len(grams&oldgrams)/len(union) if union else 0
+            if similarity>=threshold:
+                group=previous.get('republication_group') or hashlib.sha256(previous['url'].encode()).hexdigest()[:20]
+                previous['republication_group']=group;row['republication_group']=group
+                row['possible_republication']=True;previous['possible_republication']=True
+                row['similarity_review']={'candidate_url':previous['url'],'similarity':round(similarity,3),'decision':'human_review_required','method':'word_4gram_jaccard'}
+                break
+        candidates.append((row,grams,numbers))
+    return rows
