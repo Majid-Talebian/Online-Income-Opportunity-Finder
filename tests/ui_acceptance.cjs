@@ -28,6 +28,9 @@ async function open(){const vc=new VirtualConsole();vc.on('jsdomError',e=>errors
  const leadIds=[...d.querySelectorAll('tr[data-lead-id]')].map(x=>x.dataset.leadId);
  for(const [index,id] of leadIds.entries()){const answers=[index===0?'5':'1','Explicit synthetic acceptance review'];w.prompt=()=>answers.shift();await w.labelPriority(id)}
  w.showCalibration();assert.ok(d.getElementById('screenContent').textContent.includes('insufficient_comparable_labels'));assert.ok(d.getElementById('screenContent').textContent.includes('user_self_reported'));
+ const research=await w.post('/research',{run_id:w.current().id,selected:[leadIds[0]]});
+ const reportResponse=await fetch('http://127.0.0.1:8765/report/'+research.analyses[0].id);assert.equal(reportResponse.status,200);const reportHTML=await reportResponse.text();
+ const reportDom=new JSDOM(reportHTML,{runScripts:'dangerously'});const reportDoc=reportDom.window.document;reportDoc.querySelector('[data-tab="economics"]').click();assert.equal(reportDoc.querySelector('[data-view="economics"]').hidden,false);assert.equal(reportDoc.querySelector('[data-view="summary"]').hidden,true);reportDom.window.close();
  const sourceId=d.querySelector('[data-select-source]').dataset.selectSource;await w.post('/source-test',{source_id:sourceId});assert.ok(d.getElementById('feedRows').textContent.includes('دریافت موفق'));
  await w.archiveFeed(sourceId);assert.equal(d.querySelectorAll('[data-select-source]').length,0);assert.equal(d.querySelectorAll('tr[data-lead-id]').length,2);
  assert.deepEqual(errors,[]);console.log('PASS: profile/reload, mission/reload, source registration/probe/archive, direct scan, ranking/filter/comparison and historical run retention. DOM only; no visual browser verification.');

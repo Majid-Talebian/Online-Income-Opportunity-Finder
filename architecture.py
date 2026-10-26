@@ -155,6 +155,8 @@ def analyze_opportunity(opportunity, run, profile, user_inputs=None):
     risks = [{"id": g["id"], "severity": "blocking" if g["status"] == "blocked" else "open", "title": g["title"], "status": g["status"], "reason": g["reason"]} for g in gates if g["status"] != "confirmed"]
     if not evidence: risks.append({"id": "evidence", "severity": "blocking", "title": "شواهد کافی نیست", "status": "unknown", "reason": "منبع مستقل و قابل استناد برای این فرصت پیدا نشده است."})
     if economics.get("status") != "calculated_scenario": risks.append({"id": "economics", "severity": "open", "title": "اقتصاد فرصت محاسبه نشده", "status": "unknown", "reason": economics["message"]})
+    if economics.get("status")=="calculated_scenario" and economics.get("contribution_per_sale",0)<=0:
+        risks.append({"id":"negative_economics","severity":"blocking","title":"اقتصاد زیان‌ده یا بدون حاشیه","status":"blocked","reason":"درآمد هر فروش از هزینه متغیر بیشتر نیست؛ سناریو باید اصلاح شود."})
     decision = "توقف تا رفع مانع" if any(x["severity"] == "blocking" and x["status"] == "blocked" for x in risks) else "آزمون کوچک پس از تکمیل شواهد" if evidence else "ابتدا شواهد مستقل جمع‌آوری شود"
     sections = []
     values = {

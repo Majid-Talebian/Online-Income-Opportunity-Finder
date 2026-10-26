@@ -9,6 +9,7 @@ import architecture
 import evidence
 import screening
 import calibration
+import reports
 import source_discovery
 ROOT=Path(__file__).parent
 DB=ROOT/'arman.db'; LOCK=threading.Lock(); STOP=threading.Event(); ACTIVE=False
@@ -388,6 +389,12 @@ class Handler(BaseHTTPRequestHandler):
    except Exception as e:
     print(f'GET /api failed: {type(e).__name__}: {e}',flush=True)
     return self.send({'error':'خطا در خواندن وضعیت برنامه'},500)
+  if self.path.startswith('/report/'):
+   analysis_id=self.path.removeprefix('/report/')
+   with connect() as c:row=c.execute('SELECT body FROM objects WHERE id=? AND kind=?',(analysis_id,'analysis')).fetchone()
+   if not row:return self.send({'error':'تحلیل پیدا نشد'},404)
+   analysis=json.loads(row[0]);run=get(analysis['run_id']);title=next((x['title'] for x in run['opportunities'] if x['id']==analysis['opportunity_id']),'فرصت منتخب')
+   raw=reports.render_report(analysis,title).encode('utf-8');self.send_response(200);self.send_header('Content-Type','text/html; charset=utf-8');self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw);return
   if self.path=='/app.js':
    raw=(ROOT/'app.js').read_text(encoding='utf-8').replace('__TOKEN__',TOKEN).encode()
    self.send_response(200);self.send_header('Content-Type','application/javascript; charset=utf-8');self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(raw);return

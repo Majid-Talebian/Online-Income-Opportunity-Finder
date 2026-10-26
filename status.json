@@ -1,12 +1,12 @@
 {
-  "version": "0.11.0",
+  "version": "0.12.0",
   "scope": "local_opportunity_assessment_pipeline",
   "architecture_implemented": true,
   "phase_0": "documented_and_mapped",
   "phase_1": "local_acceptance_passed_visual_check_pending",
   "phase_2": "local_acceptance_passed_live_sources_blocked",
   "baseline_python_tests_before_architecture": 26,
-  "architecture_test_suite": "70 passed",
+  "architecture_test_suite": "75 passed",
   "visual_browser_test": false,
   "react_postgres_migration": false,
   "agent_roles": 12,
@@ -45,5 +45,8 @@
   ],
   "similar_republication_review": true,
   "user_priority_feedback": true,
-  "calibration_method": "user_label_pairwise_agreement_not_market_validation"
+  "calibration_method": "user_label_pairwise_agreement_not_market_validation",
+  "management_report_export": true,
+  "negative_contribution_blocks_recommendation": true,
+  "output_review_cases": 3
 }

@@ -18,3 +18,7 @@ The local database (`arman.db`) and personal profile (`company.json`) are exclud
 ## Acceptance checks
 
 Run `python -m unittest discover -v` for isolated backend checks. For the optional DOM acceptance suite install development dependencies with `npm install`, then run `npm run test:ui` (Node 22+, Python on PATH, port 8765 available). The application itself needs only Python. DOM tests use synthetic source fixtures and a temporary SQLite database; they do not establish live source coverage or visual browser acceptance. See [the phase acceptance report](PHASES_0_4_ACCEPTANCE.md) for open live-data and calibration requirements.
+
+## Review the actual output format
+
+After creating an assessment, open its management report from the app. The self-contained HTML is rendered from the saved analysis by `reports.py`. Run `python demo_output.py output_review.html` to inspect three explicitly synthetic cases produced by the same analysis and reporting code. This preview does not establish live discovery coverage.
